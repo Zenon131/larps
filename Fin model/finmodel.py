@@ -26,10 +26,10 @@ spec = [
 
 @jitclass(spec)
 class Fin:
-    def __init__(self):
+    def __init__(self, rpm=200):
         self.hulllength = 24 * inchtometer
         self.finwidth = 6 * inchtometer
-        self.articulationangle = 30 * degtorad  # divide by 2?
+        self.articulationangle = 15 * degtorad  # divide by 2?
         self.finclockangle = 120 * degtorad
         self.numfins = 6
         self.finconnectorlength = 1.5 * inchtometer  # design variable
@@ -38,23 +38,23 @@ class Fin:
         # / \_/ \_
 
         self.f_spatial = self.finclockangle * self.numfins / self.hulllength
-        self.f_temporal = 200 / 60 * 2 * np.pi  # tmp
+        self.f_temporal = rpm / 60 * 2 * np.pi
 
     def finFunction(self, x, y, t):
         # y is axis along fin rods (moving outwards)
-        return y * self.articulationangle * np.sin(x * self.f_spatial + t * self.f_temporal)
+        return y * np.sin(self.articulationangle) * np.sin(x * self.f_spatial + t * self.f_temporal)
 
     def finFunction_dt(self, x, y, t):
         # y is axis along fin rods (moving outwards)
-        return y * self.articulationangle * self.f_temporal * np.cos(x * self.f_spatial + t * self.f_temporal)
+        return y * np.sin(self.articulationangle) * self.f_temporal * np.cos(x * self.f_spatial + t * self.f_temporal)
 
     def finFunction_dx(self, x, y, t):
         # y is axis along fin rods (moving outwards)
-        return y * self.articulationangle * self.f_spatial * np.cos(x * self.f_spatial + t * self.f_temporal)
+        return y * np.sin(self.articulationangle) * self.f_spatial * np.cos(x * self.f_spatial + t * self.f_temporal)
 
     def finFunction_dy(self, x, y, t):
         # y is axis along fin rods (moving outwards)
-        return self.articulationangle * np.sin(x * self.f_spatial + t * self.f_temporal)
+        return np.sin(self.articulationangle) * np.sin(x * self.f_spatial + t * self.f_temporal)
 
     def pointForces_dx_dy(self, x, y, t, waterspeed):
         # gives the instantaneous force on the robot per xy differentiable element
@@ -98,7 +98,7 @@ class Fin:
 
 
 def netFinThrust(findef, t, waterspeed):
-    resx, _ = scipy.integrate.dblquad(lambda x, y: findef.pointForces_dx_dy(x, y, t, waterspeed)[0],
+    resx, _ = scipy.integrate.dblquad(lambda y, x: findef.pointForces_dx_dy(x, y, t, waterspeed)[0],
                                       0, findef.hulllength,
                                       lambda x: 0, lambda x: findef.finwidth)
 
@@ -153,8 +153,8 @@ def finTorque(findef, t, waterspeed):
 if __name__ == '__main__':
     fin = Fin()
 
-    interval = 0.005
-    frames = 50
+    interval = 0.01
+    frames = 200
     tv = np.linspace(0, interval * frames, frames)
 
     robotspeed = 0
@@ -167,6 +167,8 @@ if __name__ == '__main__':
     torquev = []
     maxforcev = []
     powerv = []
+
+    # print(0.5 * 0.83 * waterDensity * (6 * inchtometer)**2 * np.pi)
 
     for time in tv:
         print(time)
@@ -202,8 +204,16 @@ if __name__ == '__main__':
     plt.grid(True)
 
     plt.figure("driving power")
-    plt.plot(tv, powerv)
+    plt.plot(tv, powerv, label="drive power")
+    plt.plot(tv, np.array(thrustv) * np.array(speedv), label="output power")
     plt.xlabel("time(s)")
+    plt.legend()
+    plt.grid(True)
+
+    plt.figure("efficiency")
+    plt.plot(tv, np.array(thrustv) * np.array(speedv) / powerv)
+    plt.xlabel("time(s)")
+    plt.legend()
     plt.grid(True)
 
     plt.figure("max connecting rod force")
