@@ -26,35 +26,35 @@ spec = [
 
 @jitclass(spec)
 class Fin:
-    def __init__(self, rpm=200):
+    def __init__(self, rpm=200, spatialfreq=None, fins=6):
         self.hulllength = 24 * inchtometer
         self.finwidth = 6 * inchtometer
         self.articulationangle = 15 * degtorad  # divide by 2?
         self.finclockangle = 120 * degtorad
-        self.numfins = 6
+        self.numfins = fins
         self.finconnectorlength = 1.5 * inchtometer  # design variable
 
         #  _   _
         # / \_/ \_
 
-        self.f_spatial = self.finclockangle * self.numfins / self.hulllength
+        self.f_spatial = spatialfreq if spatialfreq is not None else self.finclockangle * self.numfins / self.hulllength
         self.f_temporal = rpm / 60 * 2 * np.pi
 
     def finFunction(self, x, y, t):
         # y is axis along fin rods (moving outwards)
-        return y * np.sin(self.articulationangle) * np.sin(x * self.f_spatial + t * self.f_temporal)
+        return y * self.articulationangle * np.sin(x * self.f_spatial + t * self.f_temporal)
 
     def finFunction_dt(self, x, y, t):
         # y is axis along fin rods (moving outwards)
-        return y * np.sin(self.articulationangle) * self.f_temporal * np.cos(x * self.f_spatial + t * self.f_temporal)
+        return y * self.articulationangle * self.f_temporal * np.cos(x * self.f_spatial + t * self.f_temporal)
 
     def finFunction_dx(self, x, y, t):
         # y is axis along fin rods (moving outwards)
-        return y * np.sin(self.articulationangle) * self.f_spatial * np.cos(x * self.f_spatial + t * self.f_temporal)
+        return y * self.articulationangle * self.f_spatial * np.cos(x * self.f_spatial + t * self.f_temporal)
 
     def finFunction_dy(self, x, y, t):
         # y is axis along fin rods (moving outwards)
-        return np.sin(self.articulationangle) * np.sin(x * self.f_spatial + t * self.f_temporal)
+        return self.articulationangle * np.sin(x * self.f_spatial + t * self.f_temporal)
 
     def pointForces_dx_dy(self, x, y, t, waterspeed):
         # gives the instantaneous force on the robot per xy differentiable element
@@ -69,8 +69,10 @@ class Fin:
         # finNormalVector = finNormalVector / np.linalg.norm(finNormalVector, axis=0)
         finNormalVector = finNormalVector / np.linalg.norm(finNormalVector)
 
+        # note: it's actually negative fin speed. sorry
         # finSpeedVector = np.array([np.full_like(finSpeed, 0), np.full_like(finSpeed, 0), -finSpeed])
-        finSpeedVector = np.array([0, 0, -finSpeed])
+        finSpeedVector = np.array([0, finSpeed * np.sin(angleOfFin), -finSpeed * np.cos(angleOfFin)])
+        # finSpeedVector = np.array([0, 0, -finSpeed])
 
         # reps = (*np.array(x).shape, 1)
         # waterVector = np.tile(waterspeed, reps).T + finSpeedVector
@@ -94,7 +96,7 @@ class Fin:
     def pointTorque_dx_dy(self, x, y, t, waterspeed):
         forces = self.pointForces_dx_dy(x, y, t, waterspeed)
         angleOfFin = np.atan(self.finFunction_dy(x, y, t))
-        return y * (np.cos(angleOfFin) * forces[2] - np.sin(angleOfFin) * forces[1])
+        return y * (np.sin(angleOfFin) * forces[1] - np.cos(angleOfFin) * forces[2])
 
 
 def netFinThrust(findef, t, waterspeed):
@@ -112,7 +114,7 @@ def finTorque(findef, t, waterspeed):
     maxforce = 0
     netwheeltorque = 0
     for i in range(findef.numfins):
-        resx, _ = scipy.integrate.dblquad(lambda y, x: findef.pointTorque_dx_dy(x, y, t, waterspeed),
+        resx, _ = scipy.integrate.dblquad(lambda y, x: abs(findef.pointTorque_dx_dy(x, y, t, waterspeed)),
                                           curEnd, (i+0.5) * findef.hulllength/findef.numfins,
                                           lambda x: 0, lambda x: findef.finwidth)
         nettorque += np.abs(resx)
@@ -121,7 +123,7 @@ def finTorque(findef, t, waterspeed):
         flapForce = np.abs(resx) / findef.finconnectorlength
         maxforce = max(maxforce, flapForce)
 
-        wheelrad = findef.finconnectorlength * findef.articulationangle
+        wheelrad = findef.finconnectorlength * np.sin(findef.articulationangle)
         wheelangle = i * findef.hulllength / findef.numfins * findef.f_spatial + t * findef.f_temporal
 
         wheeltorque = np.abs(flapForce * np.cos(wheelangle) * wheelrad)
@@ -137,10 +139,10 @@ def finTorque(findef, t, waterspeed):
     nettorque += np.abs(resx)
     maxtorque = max(maxtorque, np.abs(resx))
 
-    flapForce = np.abs(resx) * findef.finconnectorlength
+    flapForce = np.abs(resx) / findef.finconnectorlength
     maxforce = max(maxforce, flapForce)
 
-    wheelrad = findef.finconnectorlength * findef.articulationangle
+    wheelrad = findef.finconnectorlength * np.sin(findef.articulationangle)
     wheelangle = findef.hulllength * findef.f_spatial + t * findef.f_temporal
 
     wheeltorque = np.abs(flapForce * np.cos(wheelangle) * wheelrad)
@@ -153,9 +155,11 @@ def finTorque(findef, t, waterspeed):
 if __name__ == '__main__':
     fin = Fin()
 
-    interval = 0.01
-    frames = 200
+    interval = 0.02
+    frames = 100
     tv = np.linspace(0, interval * frames, frames)
+
+    print(fin.pointForces_dx_dy(0, 0.5, 0.01, np.zeros(3)))
 
     robotspeed = 0
     robotx = 0
